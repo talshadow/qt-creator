@@ -23,6 +23,7 @@
 #include <QThread>
 #include <QXmlStreamWriter>
 
+#include <optional>
 
 #ifdef QT_GUI_LIB
 #include "guiutils.h"
@@ -360,10 +361,22 @@ static FilePath firstOrEmpty(const FilePaths &filePaths)
 
 bool hasNativeFileDialog()
 {
+    // Creating a QFileDialog can run a nested event loop (e.g. the KDE platform theme creates a
+    // KFileWidget, which calls KJob::exec()). Code run from that loop can end up here again, and
+    // a function-local static would then wait for its own initialization: a deadlock.
+    // QFileDialog is a GUI class, so this is only ever called from the GUI thread.
+    static std::optional<bool> hasNative;
+    static bool isDetermining = false;
+    if (hasNative)
+        return *hasNative;
+    if (isDetermining)
+        return false; // Not known yet. Do not block, assume "not native" for this call only.
+    isDetermining = true;
     // Checking QFileDialog::itemDelegate() seems to be the only way to determine
     // whether the dialog is native or not.
-    static bool hasNative = QFileDialog().itemDelegate() == nullptr;
-    return hasNative;
+    hasNative = QFileDialog().itemDelegate() == nullptr;
+    isDetermining = false;
+    return *hasNative;
 }
 
 FilePath getOpenFilePath(const QString &caption,
